@@ -20,6 +20,7 @@ export const createSaverSchema = z.object({
   saver_code: z
     .string()
     .trim()
+    .nullable()
     .optional()
     .transform((v) => (v && v.length > 0 ? v.toUpperCase() : undefined))
     .refine(
@@ -44,12 +45,14 @@ export const createSaverSchema = z.object({
     .string()
     .trim()
     .max(20, "รหัสประจำตัว/รหัสแผงต้องไม่เกิน 20 ตัวอักษร")
+    .nullable()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
   notes: z
     .string()
     .trim()
     .max(500, "หมายเหตุต้องไม่เกิน 500 ตัวอักษร")
+    .nullable()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
 });
@@ -120,11 +123,14 @@ export const createTransactionSchema = z.object({
   transaction_date: z
     .string()
     .datetime({ offset: true, message: "รูปแบบวันที่ไม่ถูกต้อง" })
-    .optional(),
+    .nullable()
+    .optional()
+    .transform((v) => v ?? undefined),
   note: z
     .string()
     .trim()
     .max(300, "หมายเหตุต้องไม่เกิน 300 ตัวอักษร")
+    .nullable()
     .optional()
     .transform((v) => (v && v.length > 0 ? v : null)),
 });

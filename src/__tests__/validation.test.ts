@@ -59,6 +59,37 @@ describe("Input validation schemas", () => {
     ).toBe(false);
   });
 
+  it("accepts null optional fields and client-to-server round-tripped createSaverSchema output", () => {
+    const clientParsed = createSaverSchema.safeParse({
+      saver_code: undefined,
+      first_name: "สมชาย",
+      last_name: "ใจดี",
+      phone: "0812345678",
+      national_id: undefined,
+      notes: undefined,
+    });
+    expect(clientParsed.success).toBe(true);
+    if (!clientParsed.success) return;
+
+    const jsonRoundTrip = JSON.parse(JSON.stringify(clientParsed.data));
+    const serverParsed = createSaverSchema.safeParse(jsonRoundTrip);
+    expect(serverParsed.success).toBe(true);
+    if (serverParsed.success) {
+      expect(serverParsed.data.national_id).toBeNull();
+      expect(serverParsed.data.notes).toBeNull();
+    }
+
+    const explicitNulls = createSaverSchema.safeParse({
+      saver_code: null,
+      first_name: "สมชาย",
+      last_name: "ใจดี",
+      phone: "0812345678",
+      national_id: null,
+      notes: null,
+    });
+    expect(explicitNulls.success).toBe(true);
+  });
+
   it("rejects empty updateSaverSchema payloads and invalid status values", () => {
     expect(updateSaverSchema.safeParse({}).success).toBe(false);
     expect(
@@ -99,5 +130,18 @@ describe("Input validation schemas", () => {
         amount_baht: "-50",
       }).success
     ).toBe(false);
+
+    const nullableNote = createTransactionSchema.safeParse({
+      saver_id: "550e8400-e29b-41d4-a716-446655440000",
+      type: "deposit",
+      amount_baht: "100",
+      transaction_date: null,
+      note: null,
+    });
+    expect(nullableNote.success).toBe(true);
+    if (nullableNote.success) {
+      expect(nullableNote.data.note).toBeNull();
+      expect(nullableNote.data.transaction_date).toBeUndefined();
+    }
   });
 });
