@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TransactionModal } from "@/components/transactions/TransactionModal";
 import type { SaverWithBalance } from "@/types/database";
@@ -27,6 +27,10 @@ describe("TransactionModal workflow", () => {
     vi.restoreAllMocks();
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("shows over-withdrawal warning and disables submit when withdraw exceeds balance", () => {
     render(
       <TransactionModal
@@ -50,10 +54,12 @@ describe("TransactionModal workflow", () => {
   });
 
   it("requires confirmation step before posting deposit transaction", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ transaction: { id: "tx-123" } }),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ transaction: { id: "tx-123" } }), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      })
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const onSuccess = vi.fn();

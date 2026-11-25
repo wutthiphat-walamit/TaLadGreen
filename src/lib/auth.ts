@@ -8,35 +8,98 @@ export type AuthResult =
   | { ok: false; response: NextResponse };
 
 /**
- * Retrieve the currently authenticated and active staff profile for Server Components.
- * Returns null if unauthenticated, inactive, or Supabase is not configured.
+ * Detailed authentication state for server layouts and the session endpoint.
+ * Distinguishing these states prevents redirect loops for users who are signed in
+ * but do not have an active staff profile.
  */
-export async function getCurrentStaff(): Promise<StaffProfile | null> {
-  if (!getSupabaseEnv().configured) {
-    return null;
-  }
+export type AuthState =
+  | { status: "unconfigured" }
+  | { status: "unauthenticated" }
+  | { status: "no_profile" }
+  | { status: "inactive"; profile: StaffProfile }
+  | { status: "error" }
+  | { status: "active"; profile: StaffProfile };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
+const PROFILE_COLUMNS =
+  "id, email, full_name, role, is_active, created_at, updated_at";
 
-  if (userError || !user) {
-    return null;
-  }
+interface ProfileLoadResult {
+  profile: StaffProfile | null;
+  missing: boolean;
+  error: boolean;
+}
 
-  const { data: profile, error: profileError } = await supabase
+type ServerSupabaseClient = Awaited<ReturnType<typeof createClient>>;
+
+async function loadStaffProfile(
+  supabase: ServerSupabaseClient,
+  userId: string
+): Promise<ProfileLoadResult> {
+  const { data, error } = await supabase
     .from("staff_profiles")
-    .select("id, email, full_name, role, is_active, created_at, updated_at")
-    .eq("id", user.id)
+    .select(PROFILE_COLUMNS)
+    .eq("id", userId)
     .single();
 
-  if (profileError || !profile || !profile.is_active) {
-    return null;
+  if (error) {
+    // PostgREST returns PGRST116 when .single() matches no row.
+    if (error.code === "PGRST116") {
+      return { profile: null, missing: true, error: false };
+    }
+    return { profile: null, missing: false, error: true };
   }
 
-  return profile as StaffProfile;
+  if (!data) {
+    return { profile: null, missing: true, error: false };
+  }
+
+  return { profile: data as StaffProfile, missing: false, error: false };
+}
+
+/**
+ * Resolve the complete authentication state without throwing.
+ * Used by the protected layout and the login page's session check.
+ */
+export async function getAuthState(): Promise<AuthState> {
+  if (!getSupabaseEnv().configured) {
+    return { status: "unconfigured" };
+  }
+
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      return { status: "unauthenticated" };
+    }
+
+    const result = await loadStaffProfile(supabase, user.id);
+    if (result.error) {
+      return { status: "error" };
+    }
+    if (!result.profile) {
+      return { status: "no_profile" };
+    }
+    if (!result.profile.is_active) {
+      return { status: "inactive", profile: result.profile };
+    }
+
+    return { status: "active", profile: result.profile };
+  } catch {
+    return { status: "error" };
+  }
+}
+
+/**
+ * Retrieve the currently authenticated and active staff profile for Server Components.
+ * Returns null for unauthenticated, inactive, missing, or errored states.
+ */
+export async function getCurrentStaff(): Promise<StaffProfile | null> {
+  const state = await getAuthState();
+  return state.status === "active" ? state.profile : null;
 }
 
 /**
@@ -69,13 +132,9 @@ export async function requireStaff(): Promise<AuthResult> {
     };
   }
 
-  const { data: profile, error: profileError } = await supabase
-    .from("staff_profiles")
-    .select("id, email, full_name, role, is_active, created_at, updated_at")
-    .eq("id", user.id)
-    .single();
+  const result = await loadStaffProfile(supabase, user.id);
 
-  if (profileError || !profile) {
+  if (result.error || result.missing || !result.profile) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -85,7 +144,7 @@ export async function requireStaff(): Promise<AuthResult> {
     };
   }
 
-  if (!profile.is_active) {
+  if (!result.profile.is_active) {
     return {
       ok: false,
       response: NextResponse.json(
@@ -97,7 +156,7 @@ export async function requireStaff(): Promise<AuthResult> {
 
   return {
     ok: true,
-    staff: profile as StaffProfile,
+    staff: result.profile,
     supabase,
   };
 }

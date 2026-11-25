@@ -2,15 +2,14 @@
 
 import * as React from "react";
 import Link from "next/link";
-import {
-  ArrowDownLeft,
-  ArrowUpRight,
-  Search,
-  AlertCircle,
-} from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Search } from "lucide-react";
 import { formatSatangAsBaht } from "@/lib/money";
 import { formatThaiDateTime, cn } from "@/lib/utils";
+import { useApiResource } from "@/hooks/use-api-resource";
 import { Button } from "@/components/ui/button";
+import { ErrorAlert } from "@/components/ui/error-alert";
+import { FilterTabs } from "@/components/ui/filter-tabs";
+import { PageHeader } from "@/components/ui/page-header";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,47 +25,43 @@ import {
 import { TransactionModal } from "@/components/transactions/TransactionModal";
 import type { TransactionType, TransactionWithDetails } from "@/types/database";
 
+type TransactionFilter = "all" | "deposit" | "withdraw";
+
+const TRANSACTION_TYPE_TABS = [
+  { id: "all", label: "ทั้งหมด" },
+  { id: "deposit", label: "ฝากเงิน" },
+  { id: "withdraw", label: "ถอนเงิน" },
+] as const satisfies readonly { id: TransactionFilter; label: string }[];
+
+interface TransactionsResponse {
+  transactions: TransactionWithDetails[];
+}
+
 export default function TransactionsPage() {
-  const [transactions, setTransactions] = React.useState<
-    TransactionWithDetails[]
-  >([]);
-  const [typeFilter, setTypeFilter] = React.useState<
-    "all" | "deposit" | "withdraw"
-  >("all");
+  const [typeFilter, setTypeFilter] =
+    React.useState<TransactionFilter>("all");
   const [searchTerm, setSearchTerm] = React.useState("");
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = React.useState(false);
   const [modalType, setModalType] = React.useState<TransactionType>("deposit");
 
-  const loadTransactions = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ limit: "100" });
-      if (typeFilter !== "all") params.set("type", typeFilter);
-
-      const res = await fetch(`/api/transactions?${params.toString()}`, {
-        cache: "no-store",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถโหลดประวัติรายการได้");
-      }
-      setTransactions(data.transactions ?? []);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล"
-      );
-    } finally {
-      setLoading(false);
-    }
+  const listUrl = React.useMemo(() => {
+    const params = new URLSearchParams({ limit: "100" });
+    if (typeFilter !== "all") params.set("type", typeFilter);
+    return `/api/transactions?${params.toString()}`;
   }, [typeFilter]);
 
-  React.useEffect(() => {
-    loadTransactions();
-  }, [loadTransactions]);
+  const {
+    data,
+    loading,
+    error,
+    refetch,
+  } = useApiResource<TransactionsResponse>(listUrl);
+
+  const transactions = React.useMemo(
+    () => data?.transactions ?? [],
+    [data]
+  );
 
   const filteredTransactions = React.useMemo(() => {
     const q = searchTerm.trim().toLowerCase();
@@ -86,35 +81,30 @@ export default function TransactionsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1E2937]">
-            บันทึกและประวัติรายการ
-          </h1>
-          <p className="text-sm text-[#64748B]">
-            บันทึกรายการฝาก-ถอนเงิน และตรวจสอบประวัติทั้งหมด (ใหม่สุดขึ้นก่อน)
-          </p>
-        </div>
-
-        <div className="flex flex-wrap gap-2.5">
-          <Button
-            variant="success"
-            size="lg"
-            onClick={() => openModal("deposit")}
-          >
-            <ArrowDownLeft className="h-5 w-5" />
-            ฝากเงิน
-          </Button>
-          <Button
-            variant="danger"
-            size="lg"
-            onClick={() => openModal("withdraw")}
-          >
-            <ArrowUpRight className="h-5 w-5" />
-            ถอนเงิน
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title="บันทึกและประวัติรายการ"
+        description="บันทึกรายการฝาก-ถอนเงิน และตรวจสอบประวัติทั้งหมด (ใหม่สุดขึ้นก่อน)"
+        actions={
+          <>
+            <Button
+              variant="success"
+              size="lg"
+              onClick={() => openModal("deposit")}
+            >
+              <ArrowDownLeft className="h-5 w-5" />
+              ฝากเงิน
+            </Button>
+            <Button
+              variant="danger"
+              size="lg"
+              onClick={() => openModal("withdraw")}
+            >
+              <ArrowUpRight className="h-5 w-5" />
+              ถอนเงิน
+            </Button>
+          </>
+        }
+      />
 
       <Card>
         <CardContent className="pt-5 sm:pt-6">
@@ -131,43 +121,17 @@ export default function TransactionsPage() {
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              {(
-                [
-                  { id: "all", label: "ทั้งหมด" },
-                  { id: "deposit", label: "ฝากเงิน" },
-                  { id: "withdraw", label: "ถอนเงิน" },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  aria-pressed={typeFilter === tab.id}
-                  onClick={() => setTypeFilter(tab.id)}
-                  className={cn(
-                    "rounded-xl px-4 py-2 text-sm font-semibold transition-colors cursor-pointer",
-                    typeFilter === tab.id
-                      ? "bg-[#0F766E] text-white"
-                      : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <FilterTabs
+              options={TRANSACTION_TYPE_TABS}
+              value={typeFilter}
+              onChange={setTypeFilter}
+              ariaLabel="กรองประเภทรายการ"
+            />
           </div>
         </CardContent>
       </Card>
 
-      {error && (
-        <div
-          role="alert"
-          className="flex items-center gap-2.5 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-4 text-sm text-[#DC2626]"
-        >
-          <AlertCircle className="h-5 w-5 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
+      {error && <ErrorAlert message={error} onRetry={refetch} />}
 
       <Card>
         <CardContent className="p-0 sm:p-2">
@@ -253,7 +217,7 @@ export default function TransactionsPage() {
         open={modalOpen}
         onOpenChange={setModalOpen}
         initialType={modalType}
-        onSuccess={loadTransactions}
+        onSuccess={refetch}
       />
     </div>
   );

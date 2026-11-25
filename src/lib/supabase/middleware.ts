@@ -5,21 +5,25 @@ import { getSupabaseEnv } from "@/lib/supabase/env";
 const PROTECTED_PREFIXES = ["/dashboard", "/savers", "/transactions"];
 
 /**
- * Refresh auth cookies and enforce route protection using supabase.auth.getUser().
+ * Refresh auth cookies and require a session for protected routes.
+ *
+ * Important: middleware intentionally does not redirect an authenticated user away
+ * from /login. The protected layout checks the staff profile and redirects with a
+ * reason; doing both here as well would create an infinite /login <-> /dashboard loop
+ * for inactive users or users without a staff_profiles row.
  */
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const isProtectedRoute = PROTECTED_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
-  const isLoginRoute = pathname === "/login";
 
   const { url, key, configured } = getSupabaseEnv();
   if (!configured) {
     if (isProtectedRoute) {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/login";
-      loginUrl.searchParams.set("error", "unconfigured");
+      loginUrl.searchParams.set("reason", "unconfigured");
       return NextResponse.redirect(loginUrl);
     }
     return NextResponse.next({ request });
@@ -55,12 +59,6 @@ export async function updateSession(request: NextRequest) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     return NextResponse.redirect(loginUrl);
-  }
-
-  if (user && isLoginRoute) {
-    const dashboardUrl = request.nextUrl.clone();
-    dashboardUrl.pathname = "/dashboard";
-    return NextResponse.redirect(dashboardUrl);
   }
 
   return supabaseResponse;

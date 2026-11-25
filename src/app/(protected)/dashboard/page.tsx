@@ -8,13 +8,15 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Search,
-  RefreshCw,
-  AlertCircle,
   Clock,
 } from "lucide-react";
 import { formatSatangAsBaht } from "@/lib/money";
 import { formatThaiDateTime, cn } from "@/lib/utils";
+import { useApiResource } from "@/hooks/use-api-resource";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
+import { ErrorAlert } from "@/components/ui/error-alert";
+import { PageHeader } from "@/components/ui/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -30,35 +32,16 @@ import { TransactionModal } from "@/components/transactions/TransactionModal";
 import type { DashboardSummary, TransactionType } from "@/types/database";
 
 export default function DashboardPage() {
-  const [summary, setSummary] = React.useState<DashboardSummary | null>(null);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const {
+    data: summary,
+    loading,
+    error,
+    refetch,
+  } = useApiResource<DashboardSummary>("/api/dashboard");
+
   const [txModalOpen, setTxModalOpen] = React.useState(false);
   const [txInitialType, setTxInitialType] =
     React.useState<TransactionType>("deposit");
-
-  const loadDashboard = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/dashboard", { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถโหลดข้อมูลแดชบอร์ดได้");
-      }
-      setSummary(data);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  React.useEffect(() => {
-    loadDashboard();
-  }, [loadDashboard]);
 
   const openTransaction = (type: TransactionType) => {
     setTxInitialType(type);
@@ -67,56 +50,36 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header & Quick Actions */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1E2937]">ภาพรวมการออมตลาด</h1>
-          <p className="text-sm text-[#64748B]">
-            สรุปยอดเงินออมรวม จำนวนผู้ฝาก และความเคลื่อนไหวล่าสุด
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            variant="success"
-            size="lg"
-            onClick={() => openTransaction("deposit")}
-          >
-            <ArrowDownLeft className="h-5 w-5" />
-            ฝากเงิน
-          </Button>
-          <Button
-            variant="danger"
-            size="lg"
-            onClick={() => openTransaction("withdraw")}
-          >
-            <ArrowUpRight className="h-5 w-5" />
-            ถอนเงิน
-          </Button>
-          <Link href="/savers">
-            <Button variant="outline" size="lg">
+      <PageHeader
+        title="ภาพรวมการออมตลาด"
+        description="สรุปยอดเงินออมรวม จำนวนผู้ฝาก และความเคลื่อนไหวล่าสุด"
+        actions={
+          <>
+            <Button
+              variant="success"
+              size="lg"
+              onClick={() => openTransaction("deposit")}
+            >
+              <ArrowDownLeft className="h-5 w-5" />
+              ฝากเงิน
+            </Button>
+            <Button
+              variant="danger"
+              size="lg"
+              onClick={() => openTransaction("withdraw")}
+            >
+              <ArrowUpRight className="h-5 w-5" />
+              ถอนเงิน
+            </Button>
+            <ButtonLink href="/savers" variant="outline" size="lg">
               <Search className="h-4 w-4" />
               ค้นหาผู้ฝาก
-            </Button>
-          </Link>
-        </div>
-      </div>
+            </ButtonLink>
+          </>
+        }
+      />
 
-      {error && (
-        <div
-          role="alert"
-          className="flex items-center justify-between gap-3 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-4 text-sm text-[#DC2626]"
-        >
-          <div className="flex items-center gap-2.5">
-            <AlertCircle className="h-5 w-5 shrink-0" />
-            <span>{error}</span>
-          </div>
-          <Button variant="outline" size="sm" onClick={loadDashboard}>
-            <RefreshCw className="h-4 w-4" />
-            ลองใหม่
-          </Button>
-        </div>
-      )}
+      {error && <ErrorAlert message={error} onRetry={refetch} />}
 
       {/* Summary Cards */}
       {loading ? (
@@ -212,11 +175,9 @@ export default function DashboardPage() {
               แสดง 10 รายการล่าสุดเรียงตามเวลาใหม่สุดไปเก่าสุด
             </p>
           </div>
-          <Link href="/transactions">
-            <Button variant="outline" size="sm">
-              ดูทั้งหมด
-            </Button>
-          </Link>
+          <ButtonLink href="/transactions" variant="outline" size="sm">
+            ดูทั้งหมด
+          </ButtonLink>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -297,7 +258,7 @@ export default function DashboardPage() {
         open={txModalOpen}
         onOpenChange={setTxModalOpen}
         initialType={txInitialType}
-        onSuccess={loadDashboard}
+        onSuccess={refetch}
       />
     </div>
   );

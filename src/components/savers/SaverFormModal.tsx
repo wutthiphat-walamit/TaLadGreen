@@ -3,6 +3,7 @@
 import * as React from "react";
 import { AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-client";
 import { createSaverSchema, updateSaverSchema } from "@/lib/validation";
 import {
   Dialog,
@@ -76,15 +77,13 @@ export function SaverFormModal({
 
       setSubmitting(true);
       try {
-        const res = await fetch(`/api/savers/${saver.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(parsed.data),
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          throw new Error(data.error ?? "ไม่สามารถแก้ไขข้อมูลผู้ฝากได้");
-        }
+        const data = await apiFetch<{ saver: SaverWithBalance }>(
+          `/api/savers/${saver.id}`,
+          {
+            method: "PATCH",
+            body: JSON.stringify(parsed.data),
+          }
+        );
         toast.success("บันทึกการแก้ไขข้อมูลผู้ฝากเรียบร้อย");
         onSuccess(data.saver);
         onOpenChange(false);
@@ -114,15 +113,10 @@ export function SaverFormModal({
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/savers", {
+      const data = await apiFetch<{ saver: SaverWithBalance }>("/api/savers", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(parsed.data),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถเพิ่มผู้ฝากได้");
-      }
       toast.success("เพิ่มผู้ฝากเงินใหม่เรียบร้อย");
       onSuccess(data.saver);
       onOpenChange(false);

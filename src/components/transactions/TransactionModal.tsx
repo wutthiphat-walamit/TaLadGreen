@@ -9,6 +9,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch, isAbortError } from "@/lib/api-client";
 import {
   canWithdraw,
   formatSatangAsBaht,
@@ -86,23 +87,36 @@ export function TransactionModal({
     }
 
     if (!preselectedSaver) {
+      const controller = new AbortController();
+      let active = true;
+
       setLoadingSavers(true);
-      fetch("/api/savers?status=active")
-        .then(async (res) => {
-          const data = await res.json();
-          if (!res.ok) {
-            throw new Error(data.error ?? "ไม่สามารถโหลดรายชื่อผู้ฝากเงินได้");
+      apiFetch<{ savers: SaverWithBalance[] }>("/api/savers?status=active", {
+        signal: controller.signal,
+      })
+        .then((payload) => {
+          if (active) {
+            setSaverList(payload.savers ?? []);
           }
-          setSaverList(data.savers ?? []);
         })
-        .catch((err) => {
+        .catch((err: unknown) => {
+          if (!active || isAbortError(err)) return;
           setErrorMessage(
             err instanceof Error
               ? err.message
               : "ไม่สามารถโหลดรายชื่อผู้ฝากเงินได้"
           );
         })
-        .finally(() => setLoadingSavers(false));
+        .finally(() => {
+          if (active) {
+            setLoadingSavers(false);
+          }
+        });
+
+      return () => {
+        active = false;
+        controller.abort();
+      };
     }
   }, [open, initialType, preselectedSaver, providedSavers]);
 
@@ -169,9 +183,8 @@ export function TransactionModal({
         ? new Date(transactionDate).toISOString()
         : new Date().toISOString();
 
-      const res = await fetch("/api/transactions", {
+      await apiFetch<{ transaction: unknown }>("/api/transactions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           saver_id: selectedSaver.id,
           type,
@@ -180,11 +193,6 @@ export function TransactionModal({
           note: note.trim() || undefined,
         }),
       });
-
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถบันทึกรายการได้");
-      }
 
       toast.success(
         type === "deposit"

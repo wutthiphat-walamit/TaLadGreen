@@ -9,12 +9,16 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
   Phone,
-  AlertCircle,
   UserPlus,
 } from "lucide-react";
 import { formatSatangAsBaht } from "@/lib/money";
-import { cn } from "@/lib/utils";
+import { useApiResource } from "@/hooks/use-api-resource";
+import { useDebouncedValue } from "@/hooks/use-debounced-value";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
+import { ErrorAlert } from "@/components/ui/error-alert";
+import { FilterTabs } from "@/components/ui/filter-tabs";
+import { PageHeader } from "@/components/ui/page-header";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -32,17 +36,26 @@ import { SaverFormModal } from "@/components/savers/SaverFormModal";
 import { TransactionModal } from "@/components/transactions/TransactionModal";
 import type { SaverWithBalance, TransactionType } from "@/types/database";
 
+type SaverStatusFilter = "all" | "active" | "suspended";
+
+const SAVER_STATUS_TABS = [
+  { id: "all", label: "ทั้งหมด" },
+  { id: "active", label: "ใช้งาน" },
+  { id: "suspended", label: "ระงับ" },
+] as const satisfies readonly { id: SaverStatusFilter; label: string }[];
+
+interface SaversResponse {
+  savers: SaverWithBalance[];
+}
+
 function SaversContent() {
   const searchParams = useSearchParams();
   const initialQuery = searchParams.get("q") ?? "";
 
   const [query, setQuery] = React.useState(initialQuery);
-  const [statusFilter, setStatusFilter] = React.useState<
-    "all" | "active" | "suspended"
-  >("all");
-  const [savers, setSavers] = React.useState<SaverWithBalance[]>([]);
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const debouncedQuery = useDebouncedValue(query, 200);
+  const [statusFilter, setStatusFilter] =
+    React.useState<SaverStatusFilter>("all");
 
   const [addModalOpen, setAddModalOpen] = React.useState(false);
   const [txModalOpen, setTxModalOpen] = React.useState(false);
@@ -54,37 +67,24 @@ function SaversContent() {
     setQuery(searchParams.get("q") ?? "");
   }, [searchParams]);
 
-  const fetchSavers = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (query.trim()) params.set("q", query.trim());
-      if (statusFilter !== "all") params.set("status", statusFilter);
+  const listUrl = React.useMemo(() => {
+    const params = new URLSearchParams();
+    const trimmedQuery = debouncedQuery.trim();
+    if (trimmedQuery) params.set("q", trimmedQuery);
+    if (statusFilter !== "all") params.set("status", statusFilter);
 
-      const res = await fetch(`/api/savers?${params.toString()}`, {
-        cache: "no-store",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถโหลดรายชื่อผู้ฝากเงินได้");
-      }
-      setSavers(data.savers ?? []);
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [query, statusFilter]);
+    const queryString = params.toString();
+    return queryString ? `/api/savers?${queryString}` : "/api/savers";
+  }, [debouncedQuery, statusFilter]);
 
-  React.useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchSavers();
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [fetchSavers]);
+  const {
+    data,
+    loading,
+    error,
+    refetch,
+  } = useApiResource<SaversResponse>(listUrl);
+
+  const savers = data?.savers ?? [];
 
   const openQuickTx = (saver: SaverWithBalance, type: TransactionType) => {
     setSelectedSaver(saver);
@@ -94,18 +94,16 @@ function SaversContent() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-[#1E2937]">รายชื่อผู้ฝากเงิน</h1>
-          <p className="text-sm text-[#64748B]">
-            ค้นหาด้วยชื่อ รหัสประจำตัว หรือเบอร์โทรศัพท์ พร้อมทำรายการได้ทันที
-          </p>
-        </div>
-        <Button size="lg" onClick={() => setAddModalOpen(true)}>
-          <UserPlus className="h-5 w-5" />
-          เพิ่มผู้ฝากใหม่
-        </Button>
-      </div>
+      <PageHeader
+        title="รายชื่อผู้ฝากเงิน"
+        description="ค้นหาด้วยชื่อ รหัสประจำตัว หรือเบอร์โทรศัพท์ พร้อมทำรายการได้ทันที"
+        actions={
+          <Button size="lg" onClick={() => setAddModalOpen(true)}>
+            <UserPlus className="h-5 w-5" />
+            เพิ่มผู้ฝากใหม่
+          </Button>
+        }
+      />
 
       {/* Search & Status Filters */}
       <Card>
@@ -123,43 +121,17 @@ function SaversContent() {
               />
             </div>
 
-            <div className="flex items-center gap-2">
-              {(
-                [
-                  { id: "all", label: "ทั้งหมด" },
-                  { id: "active", label: "ใช้งาน" },
-                  { id: "suspended", label: "ระงับ" },
-                ] as const
-              ).map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  aria-pressed={statusFilter === tab.id}
-                  onClick={() => setStatusFilter(tab.id)}
-                  className={cn(
-                    "rounded-xl px-4 py-2 text-sm font-semibold transition-colors cursor-pointer",
-                    statusFilter === tab.id
-                      ? "bg-[#0F766E] text-white"
-                      : "bg-[#F1F5F9] text-[#475569] hover:bg-[#E2E8F0]"
-                  )}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+            <FilterTabs
+              options={SAVER_STATUS_TABS}
+              value={statusFilter}
+              onChange={setStatusFilter}
+              ariaLabel="กรองสถานะผู้ฝาก"
+            />
           </div>
         </CardContent>
       </Card>
 
-      {error && (
-        <div
-          role="alert"
-          className="flex items-center gap-2.5 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-4 text-sm text-[#DC2626]"
-        >
-          <AlertCircle className="h-5 w-5 shrink-0" />
-          <span>{error}</span>
-        </div>
-      )}
+      {error && <ErrorAlert message={error} onRetry={refetch} />}
 
       {/* Results: Desktop Table & Mobile Cards */}
       {loading ? (
@@ -262,11 +234,13 @@ function SaversContent() {
                           <ArrowUpRight className="h-3.5 w-3.5" />
                           ถอน
                         </Button>
-                        <Link href={`/savers/${saver.id}`}>
-                          <Button size="sm" variant="outline">
-                            โปรไฟล์
-                          </Button>
-                        </Link>
+                        <ButtonLink
+                          href={`/savers/${saver.id}`}
+                          size="sm"
+                          variant="outline"
+                        >
+                          โปรไฟล์
+                        </ButtonLink>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -335,11 +309,14 @@ function SaversContent() {
                     >
                       ถอนเงิน
                     </Button>
-                    <Link href={`/savers/${saver.id}`} className="w-full">
-                      <Button size="sm" variant="outline" className="w-full">
-                        ดูประวัติ
-                      </Button>
-                    </Link>
+                    <ButtonLink
+                      href={`/savers/${saver.id}`}
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                    >
+                      ดูประวัติ
+                    </ButtonLink>
                   </div>
                 </CardContent>
               </Card>
@@ -351,7 +328,7 @@ function SaversContent() {
       <SaverFormModal
         open={addModalOpen}
         onOpenChange={setAddModalOpen}
-        onSuccess={() => fetchSavers()}
+        onSuccess={() => refetch()}
       />
 
       <TransactionModal
@@ -359,7 +336,7 @@ function SaversContent() {
         onOpenChange={setTxModalOpen}
         initialType={txType}
         preselectedSaver={selectedSaver}
-        onSuccess={() => fetchSavers()}
+        onSuccess={() => refetch()}
       />
     </div>
   );

@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft,
@@ -15,9 +14,12 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-client";
 import { formatSatangAsBaht } from "@/lib/money";
 import { formatThaiDateTime, cn } from "@/lib/utils";
+import { useApiResource } from "@/hooks/use-api-resource";
 import { Button } from "@/components/ui/button";
+import { ButtonLink } from "@/components/ui/button-link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -47,17 +49,28 @@ import type {
   TransactionWithDetails,
 } from "@/types/database";
 
+interface SaverProfileResponse {
+  saver: SaverWithBalance;
+  transactions: TransactionWithDetails[];
+  currentStaffRole: StaffRole;
+}
+
 export default function SaverProfilePage() {
   const params = useParams<{ id: string }>();
   const saverId = params.id;
 
-  const [saver, setSaver] = React.useState<SaverWithBalance | null>(null);
-  const [transactions, setTransactions] = React.useState<
-    TransactionWithDetails[]
-  >([]);
-  const [staffRole, setStaffRole] = React.useState<StaffRole>("staff");
-  const [loading, setLoading] = React.useState(true);
-  const [error, setError] = React.useState<string | null>(null);
+  const {
+    data,
+    loading,
+    error,
+    refetch,
+  } = useApiResource<SaverProfileResponse>(
+    saverId ? `/api/savers/${saverId}` : null
+  );
+
+  const saver = data?.saver ?? null;
+  const transactions = data?.transactions ?? [];
+  const staffRole = data?.currentStaffRole ?? "staff";
 
   const [editOpen, setEditOpen] = React.useState(false);
   const [txOpen, setTxOpen] = React.useState(false);
@@ -65,54 +78,25 @@ export default function SaverProfilePage() {
   const [statusDialogOpen, setStatusDialogOpen] = React.useState(false);
   const [updatingStatus, setUpdatingStatus] = React.useState(false);
 
-  const loadProfile = React.useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/savers/${saverId}`, { cache: "no-store" });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถโหลดข้อมูลผู้ฝากได้");
-      }
-      setSaver(data.saver);
-      setTransactions(data.transactions ?? []);
-      if (data.currentStaffRole) {
-        setStaffRole(data.currentStaffRole);
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการโหลดข้อมูล"
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [saverId]);
-
-  React.useEffect(() => {
-    loadProfile();
-  }, [loadProfile]);
-
   const handleToggleStatus = async () => {
     if (!saver) return;
     const nextStatus = saver.status === "active" ? "suspended" : "active";
     setUpdatingStatus(true);
     try {
-      const res = await fetch(`/api/savers/${saver.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error ?? "ไม่สามารถเปลี่ยนสถานะได้");
-      }
+      await apiFetch<{ saver: SaverWithBalance }>(
+        `/api/savers/${saver.id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ status: nextStatus }),
+        }
+      );
       toast.success(
         nextStatus === "suspended"
           ? "ระงับบัญชีผู้ฝากเรียบร้อย"
           : "เปิดใช้งานบัญชีผู้ฝากเรียบร้อย"
       );
       setStatusDialogOpen(false);
-      loadProfile();
+      refetch();
     } catch (err) {
       toast.error(
         err instanceof Error ? err.message : "เกิดข้อผิดพลาดในการเปลี่ยนสถานะ"
@@ -135,12 +119,10 @@ export default function SaverProfilePage() {
   if (error || !saver) {
     return (
       <div className="space-y-4">
-        <Link href="/savers">
-          <Button variant="outline">
-            <ArrowLeft className="h-4 w-4" />
-            กลับไปรายชื่อผู้ฝาก
-          </Button>
-        </Link>
+        <ButtonLink href="/savers" variant="outline">
+          <ArrowLeft className="h-4 w-4" />
+          กลับไปรายชื่อผู้ฝาก
+        </ButtonLink>
         <div
           role="alert"
           className="flex items-center gap-2.5 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-5 text-sm text-[#DC2626]"
@@ -155,12 +137,10 @@ export default function SaverProfilePage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-3">
-        <Link href="/savers">
-          <Button variant="outline" size="sm">
-            <ArrowLeft className="h-4 w-4" />
-            รายชื่อผู้ฝากทั้งหมด
-          </Button>
-        </Link>
+        <ButtonLink href="/savers" variant="outline" size="sm">
+          <ArrowLeft className="h-4 w-4" />
+          รายชื่อผู้ฝากทั้งหมด
+        </ButtonLink>
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -380,7 +360,7 @@ export default function SaverProfilePage() {
         open={editOpen}
         onOpenChange={setEditOpen}
         saver={saver}
-        onSuccess={() => loadProfile()}
+        onSuccess={() => refetch()}
       />
 
       <TransactionModal
@@ -388,7 +368,7 @@ export default function SaverProfilePage() {
         onOpenChange={setTxOpen}
         initialType={txType}
         preselectedSaver={saver}
-        onSuccess={() => loadProfile()}
+        onSuccess={() => refetch()}
       />
 
       {/* Admin Status Toggle Confirmation */}

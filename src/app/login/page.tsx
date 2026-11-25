@@ -1,22 +1,61 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Wallet, Lock, Mail, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
+import {
+  getLoginErrorMessage,
+  getLoginReasonMessage,
+  getSessionBlockedMessage,
+} from "@/lib/auth-messages";
 import { loginSchema } from "@/lib/validation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 
-export default function LoginPage() {
+interface SessionCheckResponse {
+  active?: boolean;
+  reason?: string;
+}
+
+function LoginContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const reason = searchParams.get("reason");
+
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
   const [loading, setLoading] = React.useState(false);
-  const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = React.useState<string | null>(() =>
+    getLoginReasonMessage(reason)
+  );
+
+  React.useEffect(() => {
+    const message = getLoginReasonMessage(reason);
+    if (message) {
+      setErrorMessage(message);
+    }
+  }, [reason]);
+
+  // If the session exists but the staff profile is inactive/missing, clear it so
+  // the user is not left in a signed-in-but-blocked state.
+  React.useEffect(() => {
+    if (reason !== "inactive" && reason !== "no_profile" && reason !== "session") {
+      return;
+    }
+
+    try {
+      void createClient()
+        .auth.signOut()
+        .catch(() => {});
+    } catch {
+      // Supabase may not be configured; the login form still explains the state.
+    }
+  }, [reason]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,7 +76,28 @@ export default function LoginPage() {
       });
 
       if (error) {
-        setErrorMessage("อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง");
+        setErrorMessage(getLoginErrorMessage(error));
+        setLoading(false);
+        return;
+      }
+
+      // Supabase Auth can sign in an inactive account; verify the staff profile
+      // before navigating so we never enter the protected layout with no access.
+      const sessionResponse = await fetch("/api/auth/session", {
+        cache: "no-store",
+      });
+      const session = (await sessionResponse
+        .json()
+        .catch(() => null)) as SessionCheckResponse | null;
+
+      if (!sessionResponse.ok || !session?.active) {
+        if (
+          session?.reason === "inactive" ||
+          session?.reason === "no_profile"
+        ) {
+          await supabase.auth.signOut().catch(() => {});
+        }
+        setErrorMessage(getSessionBlockedMessage(session?.reason));
         setLoading(false);
         return;
       }
@@ -45,11 +105,9 @@ export default function LoginPage() {
       toast.success("เข้าสู่ระบบสำเร็จ");
       router.push("/dashboard");
       router.refresh();
-    } catch (err) {
+    } catch {
       setErrorMessage(
-        err instanceof Error
-          ? err.message
-          : "เกิดข้อผิดพลาดในการเชื่อมต่อระบบ"
+        "เกิดข้อผิดพลาดในการเชื่อมต่อระบบ กรุณาตรวจสอบอินเทอร์เน็ตแล้วลองใหม่"
       );
       setLoading(false);
     }
@@ -138,5 +196,21 @@ export default function LoginPage() {
         </Card>
       </div>
     </div>
+  );
+}
+
+function LoginFallback() {
+  return (
+    <div className="min-h-screen bg-[#F8FAFC] flex items-center justify-center px-4">
+      <Skeleton className="h-96 w-full max-w-md" />
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <React.Suspense fallback={<LoginFallback />}>
+      <LoginContent />
+    </React.Suspense>
   );
 }

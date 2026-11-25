@@ -15,6 +15,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { apiFetch } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -67,10 +68,7 @@ export function AppShell({ staff, children }: AppShellProps) {
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
-      const response = await fetch("/api/auth/logout", { method: "POST" });
-      if (!response.ok) {
-        throw new Error("Logout failed");
-      }
+      await apiFetch<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
       toast.success("ออกจากระบบเรียบร้อยแล้ว");
       router.push("/login");
       router.refresh();
